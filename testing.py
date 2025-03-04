@@ -4,7 +4,9 @@ from performer.performer import graph
 from utils.sql_utils import save_sql_queries
 
 
-query = "Identify and give me solutions to optimize my postgres database"
+query = [
+    "Identify and give me solutions to optimize my postgres database"
+    ]
 # schema = """
 # CREATE TABLE ecommerce.customers (
 #     id SERIAL PRIMARY KEY,
@@ -48,6 +50,7 @@ schema = """
 thread = {"configurable": {"thread_id": "1"}}
 
 for event in graph.stream({"query":query,"schema":schema,}, thread, stream_mode="values"):
+
     analysis = event.get('analysis', '')
     print(analysis)
 

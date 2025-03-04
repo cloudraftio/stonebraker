@@ -3,8 +3,25 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage
 from llm.llm import llm # Change according to where you want to test with
 from langgraph.graph import START, END, StateGraph
+from sql.sql_agent import SQLAgent
+from langchain_core.tools import tool
+from typing import Annotated, Literal
+from langgraph.types import Command, interrupt
+from feedback.human_in_loop import human
+
+db_config = {
+    "user": "postgres",
+    "password": "postgres",
+    "host": "localhost",
+    "port": "5432",
+    "database": "ecommerce_db"
+}
+
+sql_agent = SQLAgent(db_config=db_config,name="SQLAgent")
+get_dB_schema = sql_agent.get_schema() # Use this schema for dynamic databases
 
 
+# @tool
 def analyze_database(state: AgentState):
     query = state.get("query", "")
     adb = state.get("analysis", "")
@@ -54,14 +71,15 @@ def human_in_loop(state: AgentState):
     
     if user_response == "no":
         feedback = input("\nPlease provide specific feedback for improvement: ")
-        return {"feedback": feedback}
+        return {"feedback": feedback, "execute": False}
     
-    return {"feedback": ""}
+    return {"feedback": "", "execute": True}
 
 def should_continue(state: AgentState):
-    return "analyze_database" if state.get("feedback") else END
+    return "analyze_database" if state.get("execute") else END
 
 
+# @tool
 def create_human_readable(state: AgentState):
     sys_message = SystemMessage(
         content="""
@@ -92,11 +110,50 @@ def create_human_readable(state: AgentState):
     return response.content
 
 
+# @tool
+def sql_executor(state: AgentState) -> Command[Literal["sql_verifier", "true"]]:
+    execute_query = state.get("execute_query","")
+    sys_message = SystemMessage(
+        content="""
+        You are a SQL expert.
+        You have a great experience in working with Postgres Database.
+        Your main goal is to verify the incoming sql query to the provided schema.
+        Make sure you only print true or false.
+        true if the SQL format is ok.
+        false if the SQL format is not ok. 
+        """
+    )
+
+    schema = state.get("schema","")
+    hmn_message = HumanMessage(
+        content=(
+        "Check, if my SQL query will correctly execute or not."
+        f"SQL Queries: {execute_query}"
+        f"Schema: {schema}"
+        )
+    )
+    
+    message = [
+        sys_message,
+        hmn_message
+    ]
+
+    response = llm.invoke(message)
+
+    if response.content == "true":
+        sql_agent.execute_query(execute_query)
+        return END
+    else:
+        return "sql_verifier"
+
+
 builder = StateGraph(AgentState)
 
 builder.add_node("analyze_database", analyze_database)
 builder.add_node("human_in_loop", human_in_loop)
 builder.add_node("create_human_readable", create_human_readable)
+builder.add_node("sql_verifier", sql_executor)
+builder.add_node("human", human)
 
 builder.add_edge(START, "analyze_database")
 builder.add_edge("analyze_database", "human_in_loop")
