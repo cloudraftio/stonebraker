@@ -1,0 +1,72 @@
+[
+    {
+      "name": "Database Sizes",
+      "description": "Get size of all databases",
+      "query": "SELECT pg_database.datname AS Database_Name, pg_size_pretty(pg_database_size(pg_database.datname)) AS Database_Size FROM pg_database;",
+      "args": null,
+      "context": "performance"
+    },
+    {
+      "name": "Oldest Transaction ID",
+      "description": "Check oldest transaction ID age",
+      "query": "SELECT max(age(datfrozenxid)) oldest_xid FROM pg_database;",
+      "args": null,
+      "context": "maintenance"
+    },
+    {
+      "name": "Wraparound Risk Analysis",
+      "description": "Check transaction ID usage relative to wraparound protection",
+      "query": "WITH max_age AS (SELECT 2^31-3000000 AS max_old_xid, setting AS autovacuum_freeze_max_age FROM pg_catalog.pg_settings WHERE name = 'autovacuum_freeze_max_age'), per_database_stats AS (SELECT datname, m.max_old_xid::int, m.autovacuum_freeze_max_age::int, age(d.datfrozenxid) AS oldest_current_xid FROM pg_catalog.pg_database d JOIN max_age m ON (true) WHERE d.datallowconn) SELECT max(oldest_current_xid) AS oldest_current_xid, max(ROUND(100*(oldest_current_xid/max_old_xid::float))) AS percent_towards_wraparound, max(ROUND(100*(oldest_current_xid/autovacuum_freeze_max_age::float))) AS percent_towards_emergency_autovac FROM per_database_stats;",
+      "args": null,
+      "context": "maintenance"
+    },
+    {
+      "name": "Active Autovacuum Processes",
+      "description": "Show currently running autovacuum processes",
+      "query": "SELECT datname, usename, state, query, now() - pg_stat_activity.query_start AS duration, wait_event FROM pg_stat_activity WHERE query ~ '^autovacuum:' ORDER BY duration;",
+      "args": null,
+      "context": "maintenance"
+    },
+    {
+      "name": "Vacuum Progress Monitoring",
+      "description": "Detailed view of vacuum operations progress",
+      "query": "SELECT p.pid, now() - a.xact_start AS duration, coalesce(wait_event_type ||'.'|| wait_event, 'f') AS waiting, CASE WHEN a.query ~ '^autovacuum.*to prevent wraparound' THEN 'wraparound' WHEN a.query ~ '^vacuum' THEN 'user' ELSE 'regular' END AS mode, p.datname AS database, p.relid::regclass AS table, p.phase, a.query, pg_size_pretty(p.heap_blks_total * current_setting('block_size')::int) AS table_size, pg_size_pretty(pg_total_relation_size(p.relid)) AS total_size, pg_size_pretty(p.heap_blks_scanned * current_setting('block_size')::int) AS scanned, pg_size_pretty(p.heap_blks_vacuumed * current_setting('block_size')::int) AS vacuumed, round(100.0 * p.heap_blks_scanned / p.heap_blks_total, 1) AS scanned_pct, round(100.0 * p.heap_blks_vacuumed / p.heap_blks_total, 1) AS vacuumed_pct, p.index_vacuum_count, p.max_dead_tuples AS max_dead_tuples_per_cycle, s.n_dead_tup AS total_num_dead_tuples, ceil(s.n_dead_tup::float/p.max_dead_tuples::float) index_cycles_required FROM pg_stat_progress_vacuum p JOIN pg_stat_activity a USING (pid) JOIN pg_stat_all_tables s ON s.relid = p.relid ORDER BY now() - a.xact_start DESC;",
+      "args": null,
+      "context": "maintenance"
+    },
+    {
+      "name": "Replication Slot Status",
+      "description": "Check active replication slots and their xmin age",
+      "query": "SELECT *, age(xmin) age_xmin, age(catalog_xmin) age_catalog_xmin FROM pg_replication_slots WHERE active = true ORDER BY age(xmin) DESC;",
+      "args": null,
+      "context": "replication"
+    },
+    {
+      "name": "Invalid Connection Limit Databases",
+      "description": "Count databases with invalid connection limits",
+      "query": "SELECT count(*) FROM pg_database WHERE datconnlimit = '-2';",
+      "args": null,
+      "context": "configuration"
+    },
+    {
+      "name": "Orphaned Prepared Transactions",
+      "description": "Find long-running prepared transactions",
+      "query": "SELECT gid, prepared, owner, database, age(transaction) AS ag_xmin FROM pg_prepared_xacts ORDER BY age(transaction) DESC;",
+      "args": null,
+      "context": "transactions"
+    },
+    {
+      "name": "Vacuum Configuration Settings",
+      "description": "Show current autovacuum and maintenance parameters",
+      "query": "SELECT name, setting, source, sourcefile FROM pg_settings WHERE name LIKE '%vacuum%' OR name = 'maintenance_work_mem' ORDER BY name;",
+      "args": null,
+      "context": "configuration"
+    },
+    {
+      "name": "Index Bloat Analysis",
+      "description": "Identify index bloat and wasted space",
+      "query": "SELECT current_database(), schemaname, tablename, ROUND((CASE WHEN otta=0 THEN 0.0 ELSE sml.relpages::FLOAT/otta END)::NUMERIC,1) AS \"table_bloat_ratio\", pg_size_pretty(CASE WHEN relpages < otta THEN 0 ELSE bs*(sml.relpages-otta)::BIGINT END) AS table_wasted_size, iname AS index_name, ROUND((CASE WHEN iotta=0 OR ipages=0 THEN 0.0 ELSE ipages::FLOAT/iotta END)::NUMERIC,1) AS \"index_bloat_ratio\", pg_size_pretty(CASE WHEN ipages < iotta THEN 0 ELSE bs*(ipages-iotta) ::BIGINT END) AS index_wasted_size FROM (...) AS sml ORDER BY 8 DESC;",
+      "args": null,
+      "context": "maintenance"
+    }
+]
