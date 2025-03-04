@@ -1,6 +1,15 @@
 # This is postgres performant agent
 
 ### Setup
+
+#### .env Setup
+```.env
+GROQ_API_KEY=""
+GROQ_MODEL="llama-3.3-70b-specdec"
+ANALYZING_MODEL="deepseek-r1-distill-llama-70b-specdec"
+OLLAMA_MODEL="llama3.2"
+```
+
 #### Prerequisites
 - Python
 - Groq/Ollama API Keys
