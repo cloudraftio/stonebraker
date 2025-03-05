@@ -1,130 +1,168 @@
 import streamlit as st
-from performer.performer import graph
+import logging
+from typing import Dict, Any
+from performer.performer import create_performer_graph
 from agentstate.agent_state import AgentState
 from utils.sql_utils import extract_sql_queries
+from sql.sql_agent import SQLAgent
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("app.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+st.set_page_config(page_title="DB Optimizer", layout="wide")
 st.title("PostgreSQL Database Optimization Assistant")
-st.markdown("""
-This tool analyzes your PostgreSQL schema and provides actionable optimization suggestions.
-You can refine the analysis through feedback until satisfied.
-""")
 
-query = st.text_area("Enter your query or optimization request:")
-schema = st.text_area("Provide your PostgreSQL schema:")
+with st.sidebar:
+    st.header("Database Configuration")
+    db_host = st.text_input("Host", value="localhost")
+    db_port = st.number_input("Port", value=5432, min_value=1, max_value=65535)
+    db_user = st.text_input("Username", value="postgres")
+    db_password = st.text_input("Password", type="password", value="postgres")
+    db_name = st.text_input("Database Name", value="ecommerce_db")
+    test_connection = st.button("Test Connection")
+
+db_config = {
+    "host": db_host,
+    "port": db_port,
+    "user": db_user,
+    "password": db_password,
+    "database": db_name
+}
+
+if test_connection:
+    try:
+        agent = SQLAgent(db_config)
+        schema = agent.get_schema()
+        st.success(f"Connected successfully to {db_name}! Found {len(schema)} tables.")
+        logger.info(f"Successful connection to {db_config['database']}")
+    except Exception as e:
+        st.error(f"Connection failed: {str(e)}")
+        logger.error(f"Connection error: {str(e)}")
+
+query = st.text_area(
+    "Optimization Request",
+    placeholder="E.g.: 'Analyze query performance for slow orders report'",
+    height=100
+)
 
 if "thread_id" not in st.session_state:
-    st.session_state.thread_id = f"performance_optimization_{hash(query + schema)}"
+    st.session_state.thread_id = f"thread_{hash(frozenset(db_config.items()))}"
 if "analysis_history" not in st.session_state:
     st.session_state.analysis_history = []
 
-thread = {"configurable": {"thread_id": st.session_state.thread_id}}
+def initialize_agent():
+    try:
+        logger.info("Initializing SQL agent...")
+        agent = SQLAgent(db_config)
+        return agent
+    except Exception as e:
+        st.error(f"Agent initialization failed: {str(e)}")
+        logger.critical(f"Agent init failure: {str(e)}")
+        st.stop()
 
 def run_analysis():
-    """Run analysis and update history"""
-    with st.spinner("Analyzing..."):
-        for event in graph.stream(
-            {"query": query, "schema": schema},
-            thread,
-            stream_mode="values"
-        ):
-            if "analysis" in event:
-                st.session_state.analysis_history.append(event["analysis"])
+    agent = initialize_agent()
+    schema = agent.get_schema()
+    
+    st.session_state.graph = create_performer_graph(db_config)
+    
+    initial_state = AgentState(
+        query=query,
+        schema=str(schema),
+        db_config=db_config,
+        analysis="",
+        feedback="",
+        execute=False,
+        reanalyze=False,
+        execute_query="",
+        mrk_down=""
+    )
+    
+    with st.status("Running optimization analysis...", expanded=True) as status:
+        try:
+            for event in st.session_state.graph.stream(
+                initial_state,
+                {"configurable": {"thread_id": st.session_state.thread_id}},
+                stream_mode="values"
+            ):
+                if "analysis" in event:
+                    st.session_state.analysis_history.append(event["analysis"])
+                    status.write(f"Analysis iteration {len(st.session_state.analysis_history)} completed")
+                    logger.info(f"New analysis generated: {event['analysis'][:50]}...")
+            
+            status.update(label="Analysis complete!", state="complete", expanded=False)
+        except Exception as e:
+            st.error(f"Analysis pipeline failed: {str(e)}")
+            logger.error(f"Graph stream error: {str(e)}")
+            st.stop()
 
-def extract_thinking_content(analysis):
-    """Extracts the content between <think> and </think> tags."""
-    start_tag = "<think>"
-    end_tag = "</think>"
-    start_index = analysis.find(start_tag)
-    end_index = analysis.find(end_tag)
-    if start_index != -1 and end_index != -1:
-        return analysis[start_index + len(start_tag):end_index].strip()
-    return None
+def display_analysis():
+    if not st.session_state.analysis_history:
+        return
 
-def execute_sql_queries(edited_queries):
-    """Extract and execute SQL queries from the final analysis."""
-    current_state = graph.get_state(thread)
-    schema = current_state.values.get("schema", "")
-
-    # Update state with edited queries
-    graph.update_state(thread, {"execute_query": edited_queries})
-
-    # Execute each query
-    for query in edited_queries.split(";"):
-        query = query.strip()
-        if query:  # Skip empty queries
-            st.write(f"Executing: {query}")
-            try:
-                # Simulate execution (replace with actual SQL execution logic if needed)
-                st.write("Query executed successfully.")
-            except Exception as e:
-                st.error(f"Failed to execute query: {query}. Error: {str(e)}")
-
-if st.button("Analyze"):
-    if query and schema:
-        run_analysis()
-    else:
-        st.error("Please provide both query and schema")
-
-if st.session_state.analysis_history:
-    latest_analysis = st.session_state.analysis_history[-1]
-    start_tag = "<think>"
-    end_tag = "</think>"
-    if start_tag in latest_analysis and end_tag in latest_analysis:
-        start_index = latest_analysis.index(start_tag) + len(start_tag)
-        end_index = latest_analysis.index(end_tag)
-        thinking_content = latest_analysis[start_index:end_index].strip()
-    else:
-        thinking_content = "No detailed reasoning available for this analysis."
-
-    with st.expander("Thinking Mode: View Detailed Reasoning", expanded=False):
-        st.markdown(thinking_content)
-
+    latest = st.session_state.analysis_history[-1]
+    
+    with st.expander("Latest Optimization Report", expanded=True):
+        st.markdown(latest)
+    
     st.subheader("Analysis History")
     for i, analysis in enumerate(st.session_state.analysis_history, 1):
-        st.write(f"Iteration {i}:")
-        st.markdown(analysis)
+        with st.expander(f"Iteration {i}", expanded=False):
+            st.markdown(analysis)
 
-    st.subheader("Feedback")
-    col1, col2 = st.columns(2)
+def execute_queries():
+    if not st.session_state.analysis_history:
+        return
     
-    with col1:
-        if st.button("Yes - Accept Analysis"):
-            graph.update_state(thread, {"execute": True})
-            st.success("Analysis accepted! Proceeding to SQL execution...")
-            
-            # Extract SQL queries from the latest analysis
-            current_state = graph.get_state(thread)
-            analysis = current_state.values.get("analysis", "")
-            sql_queries = extract_sql_queries(analysis)
+    current_analysis = st.session_state.analysis_history[-1]
+    sql_queries = extract_sql_queries(current_analysis)
+    
+    if not sql_queries:
+        st.warning("No SQL queries found in the analysis")
+        return
+    
+    with st.form("query_execution"):
+        edited_queries = st.text_area(
+            "SQL Queries to Execute",
+            value=sql_queries,
+            height=300
+        )
+        
+        if st.form_submit_button("Execute Queries"):
+            try:
+                agent = SQLAgent(db_config)
+                queries = [q.strip() for q in edited_queries.split(";") if q.strip()]
+                
+                with st.status("Executing SQL...") as status:
+                    for i, query in enumerate(queries, 1):
+                        try:
+                            st.write(f"**Query {i}:**")
+                            st.code(query, language="sql")
+                            result = agent.execute_query(query)
+                            st.json(result)
+                            st.success("Executed successfully")
+                            logger.info(f"Executed query {i}: {query[:50]}...")
+                        except Exception as e:
+                            st.error(f"Execution failed: {str(e)}")
+                            logger.error(f"Query {i} error: {str(e)}")
+            except Exception as e:
+                st.error(f"Execution setup failed: {str(e)}")
+                logger.error(f"Execution setup error: {str(e)}")
 
-            if not sql_queries:
-                st.warning("No SQL queries found in the analysis.")
-            else:
-                # Display SQL queries in an editable text area
-                edited_queries = st.text_area("Edit SQL Queries:", value=sql_queries), height=200)
+if st.button("Start/Restart Analysis"):
+    if not all(db_config.values()):
+        st.error("Please fill all database credentials")
+    elif not query:
+        st.error("Please enter an optimization request")
+    else:
+        run_analysis()
 
-                # Add an "Execute" button to confirm and execute the edited queries
-                if st.button("Execute Edited Queries"):
-                    execute_sql_queries(edited_queries)
-
-    with col2:
-        if st.button("No - Revise Analysis"):
-            st.session_state.show_feedback = True
-            st.query_params = {"status": "needs_revision"}
-            st.rerun()
-
-    if st.session_state.get("show_feedback", False):
-        feedback = st.text_area("Provide specific feedback:")
-        if st.button("Submit Feedback"):
-            if feedback:
-                graph.update_state(thread, {
-                    "feedback": feedback,
-                    "reanalyze": True,
-                    "analysis_history": st.session_state.analysis_history
-                })
-                run_analysis()
-                st.session_state.show_feedback = False
-                st.query_params = {"status": "revised"}
-                st.rerun()
-            else:
-                st.warning("Feedback cannot be empty")
+display_analysis()
+execute_queries()
