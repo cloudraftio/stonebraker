@@ -62,7 +62,7 @@ def get_schema_info(db_config: dict):
             cursor.execute("""
                 SELECT table_name, column_name 
                 FROM information_schema.columns 
-                WHERE table_schema = 'public'
+                WHERE table_schema = 'ecommerce'
                 ORDER BY table_name, ordinal_position;
             """)
             rows = cursor.fetchall()

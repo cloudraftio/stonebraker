@@ -1,7 +1,7 @@
 from agentstate.agent_state import AgentState
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage
-from llm.llm import llm # Change according to where you want to test with
+from llm.llm import llm, analyze_llm, ollama_llm
 from langgraph.graph import START, END, StateGraph
 from sql.sql_agent import SQLAgent
 from langchain_core.tools import tool
@@ -14,13 +14,13 @@ from utils.sql_utils import extract_sql_queries
 db_config = {
     "user": "postgres",
     "password": "postgres",
-    "host": "localhost",
+    "host": "0.0.0.0",
     "port": "5432",
     "database": "ecommerce_db"
 }
 
 sql_agent = SQLAgent(db_config=db_config,name="SQLAgent")
-get_dB_schema = sql_agent.get_schema() # Use this schema for dynamic databases
+get_dB_schema = sql_agent.get_schema()
 
 
 # @tool
@@ -64,7 +64,7 @@ def analyze_database(state: AgentState):
     ]
 
     response = llm.invoke(message)
-    # sql_commands = extract_sql_commands(response.content)  # New helper function
+    # sql_commands = extract_sql_commands(response.content)
     return {
         "analysis": response.content,
         "feedback": fdb,
