@@ -1,6 +1,6 @@
 # TEST
 
-from performer.performer import graph
+from performer.performer import graph, human_in_loop
 from utils.sql_utils import save_sql_queries
 
 
@@ -47,14 +47,29 @@ schema = """
  products    | price
  products    | stock_quantity
 """
-thread = {"configurable": {"thread_id": "1"}}
 
-for event in graph.stream({"query":query,"schema":schema,}, thread, stream_mode="values"):
+thread = {"configurable": {"thread_id": "performance_optimization_1"}}
 
-    analysis = event.get('analysis', '')
-    print(analysis)
-
-    with open("TEST.md", "w") as f:
-        f.write(analysis)
-
-    save_sql_queries(analysis)
+while True:
+    # Run analysis phase
+    for event in graph.stream(
+        {"query": query, "schema": schema},
+        thread,
+        stream_mode="values"
+    ):
+        if "analysis" in event:
+            print("\n**Analysis**")
+            print(event["analysis"])
+    
+    # Check if execution should proceed
+    current_state = graph.get_state(thread)
+    if current_state.values.get("execute"):
+        break
+    
+    # Handle feedback loop
+    user_response = input("\nSatisfied? (yes/no): ").lower()
+    if user_response == "no":
+        feedback = input("Feedback: ")
+        graph.update_state(thread, {"feedback": feedback, "reanalyze": True})
+    else:
+        graph.update_state(thread, {"execute": True, "feedback": ""})

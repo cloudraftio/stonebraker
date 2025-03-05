@@ -16,6 +16,16 @@ def save_sql_queries(content, output_file="sql_queries.sql"):
             f.write(f"-- Query {i}\n")
             f.write(f"{query_content}\n\n")
 
+def extract_sql_queries(content: str) -> str:
+    sql_block_pattern = r"```sql\s*(.*?)\s*```"
+    sql_queries = re.finditer(sql_block_pattern, content, re.MULTILINE | re.DOTALL)
+    
+    extracted_queries = []
+    for query in sql_queries:
+        query_content = query.group(1).strip()
+        extracted_queries.append(query_content)
+    
+    return "\n\n".join(extracted_queries)
 
 def get_db_connection(db_config: dict):
     try:

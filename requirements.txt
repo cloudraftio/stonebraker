@@ -9,3 +9,4 @@ langchain
 # langgraph_checkpoints
 ipython
 typing_extensions
+streamlit

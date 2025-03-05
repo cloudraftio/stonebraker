@@ -8,6 +8,8 @@ from langchain_core.tools import tool
 from typing import Annotated, Literal
 from langgraph.types import Command, interrupt
 from feedback.human_in_loop import human
+from utils.sql_utils import extract_sql_queries
+
 
 db_config = {
     "user": "postgres",
@@ -62,8 +64,13 @@ def analyze_database(state: AgentState):
     ]
 
     response = llm.invoke(message)
-
-    return {"analysis": response.content, "feedback": ""}
+    # sql_commands = extract_sql_commands(response.content)  # New helper function
+    return {
+        "analysis": response.content,
+        "feedback": fdb,
+        "schema": schema,
+        "query": query
+    }
 
 
 def human_in_loop(state: AgentState):
@@ -71,13 +78,14 @@ def human_in_loop(state: AgentState):
     
     if user_response == "no":
         feedback = input("\nPlease provide specific feedback for improvement: ")
-        return {"feedback": feedback, "execute": False}
+        return {"feedback": feedback, "execute": False, "reanalyze": True}
     
-    return {"feedback": "", "execute": True}
+    return {"feedback": "", "execute": True, "reanalyze": False}
 
 def should_continue(state: AgentState):
-    return "analyze_database" if state.get("execute") else END
-
+    if state.get("reanalyze", False):
+        return "analyze_database"
+    return "create_human_readable" if state.get("execute") else END
 
 # @tool
 def create_human_readable(state: AgentState):
@@ -103,15 +111,25 @@ def create_human_readable(state: AgentState):
 
     response = llm.invoke(message)
 
+    sql_queries = extract_sql_queries(response.content)
+    state.update("execute_queries", sql_queries)
+
     output_file = "REPORT.md"
     with open(output_file, "w") as f:
         f.write(response.content)
 
-    return response.content
+    return {
+        "mrk_down": response.content,
+        "execute_query": sql_queries,
+        **state
+    }
 
+
+# def verify_sql(queries, schema: str) -> bool:
+    
 
 # @tool
-def sql_executor(state: AgentState) -> Command[Literal["sql_verifier", "true"]]:
+def sql_executor(state: AgentState) -> Command[Literal["sql_executor", END]]: # type: ignore
     execute_query = state.get("execute_query","")
     sys_message = SystemMessage(
         content="""
@@ -142,24 +160,27 @@ def sql_executor(state: AgentState) -> Command[Literal["sql_verifier", "true"]]:
 
     if response.content == "true":
         sql_agent.execute_query(execute_query)
-        return END
+        return END  
     else:
-        return "sql_verifier"
-
+        return "sql_executor" 
+    
 
 builder = StateGraph(AgentState)
 
 builder.add_node("analyze_database", analyze_database)
 builder.add_node("human_in_loop", human_in_loop)
 builder.add_node("create_human_readable", create_human_readable)
-builder.add_node("sql_verifier", sql_executor)
-builder.add_node("human", human)
+builder.add_node("sql_executor", sql_executor)
+# builder.add_node("human", human)
 
 builder.add_edge(START, "analyze_database")
 builder.add_edge("analyze_database", "human_in_loop")
-builder.add_edge("analyze_database", "create_human_readable")
-builder.add_conditional_edges("human_in_loop", should_continue, ["analyze_database", "create_human_readable"])
-builder.add_edge("create_human_readable", END)
+builder.add_conditional_edges(
+    "human_in_loop",
+    lambda s: "analyze_database" if s["reanalyze"] else "create_human_readable",
+    {"analyze_database", "create_human_readable"}
+)
+builder.add_edge("create_human_readable", "sql_executor")
 
 memory = MemorySaver()
 graph = builder.compile(interrupt_before=['human_in_loop'], checkpointer=memory)
