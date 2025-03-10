@@ -5,6 +5,8 @@ from performer.performer import create_performer_graph
 from agentstate.agent_state import AgentState
 from utils.sql_utils import extract_sql_queries
 from sql.sql_agent import SQLAgent
+from tester.tester import create_tester_graph
+from agentstate.agent_state import TestingState
 
 logging.basicConfig(
     level=logging.INFO,
@@ -117,6 +119,57 @@ def display_analysis():
         with st.expander(f"Iteration {i}", expanded=False):
             st.markdown(analysis)
 
+def run_performance_test(queries: str):
+    """Run performance tests on the queries before execution"""
+    try:
+        agent = SQLAgent(db_config)
+        schema = agent.get_schema()
+        
+        test_graph = create_tester_graph()
+        
+        initial_test_state = TestingState(
+            schema=str(schema),
+            execute_query=queries,
+            before_exec="",
+            after_exec="",
+            results="",
+            wind_up=""
+        )
+        
+        test_id = f"{schema}-{queries}"
+        test_thread_id = f"test_{hash(test_id)}"
+        
+        with st.status("Running performance tests...", expanded=True) as status:
+            current_state = initial_test_state
+            
+            for event in test_graph.stream(
+                current_state,
+                {"configurable": {
+                    "thread_id": test_thread_id,
+                    "checkpoint_ns": "test_performance",
+                    "checkpoint_id": f"query_{hash(queries)}"
+                }},
+                stream_mode="values"
+            ):
+                if "before_exec" in event:
+                    status.write("✅ Initial performance baseline established")
+                    current_state.update(event)
+                if "after_exec" in event:
+                    status.write("✅ Optimization impact measured")
+                    current_state.update(event)
+                if "results" in event:
+                    status.write("✅ Analysis complete")
+                    st.markdown("### Performance Analysis")
+                    st.markdown(event["results"])   
+                    current_state.update(event)
+            
+            return current_state.get("results")
+            
+    except Exception as e:
+        st.error(f"Testing failed: {str(e)}")
+        logger.error(f"Testing error: {str(e)}")
+        return None
+
 def execute_queries():
     if not st.session_state.analysis_history:
         return
@@ -135,7 +188,23 @@ def execute_queries():
             height=300
         )
         
-        if st.form_submit_button("Execute Queries"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            test_button = st.form_submit_button("Test Queries")
+        with col2:
+            execute_button = st.form_submit_button("Execute Queries")
+            
+        if test_button:
+            test_results = run_performance_test(edited_queries)
+            if test_results:
+                st.session_state.test_results = test_results
+                
+        if execute_button:
+            if "test_results" not in st.session_state:
+                st.warning("Please run performance tests before executing queries")
+                return
+                
             try:
                 agent = SQLAgent(db_config)
                 queries = [q.strip() for q in edited_queries.split(";") if q.strip()]

@@ -15,3 +15,12 @@ class AgentState(TypedDict):
     # def __init__(self):
     #     super().__init__()
     #     self["schema"] = sql_agent.get_schema()
+
+class TestingState(TypedDict):
+    schema: str
+    execute_query: str
+    before_exec: str
+    after_exec: str
+    results: str
+    wind_up: str
+    proceed_cleanup: bool
