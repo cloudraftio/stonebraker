@@ -158,8 +158,7 @@ Before contributing or deploying:
 
 ## 📞 Contact & Support
 
-- **Issues**: Use [GitHub Issue Tracker](https://github.com/yourusername/stonebraker/issues)
-- **Discussion**: Join our [Slack Channel](https://github.com/cloudraftio/stonebraker)
+- **Issues**: Use [GitHub Issue Tracker](https://github.com/cloudraftio/stonebraker/issues)
 
 ## 📄 License
 
