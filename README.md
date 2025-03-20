@@ -118,7 +118,7 @@ pip install -r requirements.txt
    - Add LLM provider credentials
 
 ## 📖 Example Usage
-![Web Interface](https://cloudraftio/stonebraker/docs/image/image.jpg)
+![Web Interface](./docs/image/image.jpg)
 *StonebrakerAI Dashboard*
 
 ## 🤝 Contributing
