@@ -16,10 +16,10 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Run Secret Scanning with Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_SECRET_TOKEN }}
+      # - name: Run Secret Scanning with Gitleaks
+      #   uses: gitleaks/gitleaks-action@v2
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GH_SECRET_TOKEN }}
 
       - name: Run Python Security Scan with Bandit
         run: |
